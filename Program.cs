@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Spectre.Console;
 
 using var database = new Database("Data Source=movies.db");
+var handler = new CommandHandler(database);
 
 while (true)
 {
@@ -17,37 +18,40 @@ while (true)
         continue;
     }
 
-    CommandHandler handler = new CommandHandler(database);
-    handler.HandleCommand(input.Trim());
+    // If the command returns false, exit the main loop to cleanly exit the application
+    // Needed so WAL journal is cleanly checked in
+    if (!handler.HandleCommand(input.Trim()))
+        break;
 }
 
 sealed class CommandHandler
 {
     private readonly Database _database;
     // Dictionary of commands and their corresponding actions, case-insensitive
-    private readonly Dictionary<string, Action> _commands;
+    private readonly Dictionary<string, Func<bool>> _commands;
 
     public CommandHandler(Database database)
     {
         _database = database;
         _commands = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["/help"] = HelpCommand,
-            ["/list"] = ListCommand,
-            ["/exit"] = TerminateSession,
-            ["/quit"] = TerminateSession,
-            ["/q"] = TerminateSession,
+            ["/help"] = () => { HelpCommand(); return true; },
+            ["/list"] = () => { ListCommand(); return true; },
+            ["/exit"] = () => false,
+            ["/quit"] = () => false,
+            ["/q"] = () => false,
         };
     }
 
-    public void HandleCommand(string command)
+    public bool HandleCommand(string command)
     {
-        if (!_commands.TryGetValue(command, out Action? action))
+        if (!_commands.TryGetValue(command, out Func<bool>? action))
         {
             AnsiConsole.MarkupLine("[red]Unknown command[/]");
-            return;
+            return true;
         }
-        action();
+
+        return action();
     }
 
     private static void HelpCommand()
@@ -70,12 +74,7 @@ sealed class CommandHandler
         }
     }
 
-    private static void TerminateSession()
-    {
-        Environment.Exit(0);
-    }
 }
-
 
 sealed class Database : IDisposable
 {
@@ -208,6 +207,13 @@ sealed class Database : IDisposable
     {
         if (_disposed)
             return;
+
+        // Checkpoint the database to ensure all changes are written to disk
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            cmd.ExecuteNonQuery();
+        }
 
         _connection.Dispose();
         _disposed = true;
