@@ -12,9 +12,17 @@ sealed class Database : IDisposable
     public Database(string connectionString)
     {
         _connection = new SqliteConnection(connectionString);
-        _connection.Open();
-        EnablePRAGMAs();
-        InitializeDatabase();
+        try
+        {
+            _connection.Open();
+            EnablePRAGMAs();
+            InitializeDatabase();
+        }
+        catch
+        {
+            _connection.Dispose();
+            throw;
+        }
     }
 
     private void EnablePRAGMAs()
@@ -33,10 +41,9 @@ sealed class Database : IDisposable
 
     private void InitializeDatabase()
     {
-        using var transaction = _connection.BeginTransaction(deferred: false);
+        using var transaction = _connection.BeginTransaction(deferred: false); // IMMEDIATE transaction
         using var command = _connection.CreateCommand();
-
-        command.Transaction = transaction;
+        command.Transaction = transaction; // make sure the command is executed in the same transaction
 
         var userVersion = GetUserVersion(command);
 
