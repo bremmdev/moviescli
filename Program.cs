@@ -1,6 +1,7 @@
 #:package Microsoft.Data.Sqlite@10.0.8
 #:package Spectre.Console@0.55.2
 
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Spectre.Console;
 
@@ -12,7 +13,7 @@ while (true)
     AnsiConsole.Markup("[grey]> [/]");
     var input = Console.ReadLine();
 
-    if (input == null || !input.StartsWith('/'))
+    if (input == null || !input.Trim().StartsWith('/'))
     {
         AnsiConsole.MarkupLine("[red]Invalid command. Commands must start with '/'[/]");
         continue;
@@ -28,30 +29,76 @@ sealed class CommandHandler
 {
     private readonly Database _database;
     // Dictionary of commands and their corresponding actions, case-insensitive
-    private readonly Dictionary<string, Func<bool>> _commands;
+    private readonly Dictionary<string, Func<string[], bool>> _commands;
 
     public CommandHandler(Database database)
     {
         _database = database;
         _commands = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["/help"] = () => { HelpCommand(); return true; },
-            ["/list"] = () => { ListCommand(); return true; },
-            ["/exit"] = () => false,
-            ["/quit"] = () => false,
-            ["/q"] = () => false,
+            ["/help"] = _ => { HelpCommand(); return true; },
+            ["/list"] = _ => { ListCommand(); return true; },
+            ["/add"] = (args) => { AddCommand(args); return true; },
+            ["/exit"] = _ => false,
+            ["/quit"] = _ => false,
+            ["/q"] = _ => false,
         };
     }
 
-    public bool HandleCommand(string command)
+    public bool HandleCommand(string input)
     {
-        if (!_commands.TryGetValue(command, out Func<bool>? action))
+        var parts = SplitCommandArgs(input.Trim());
+        if (parts.Count == 0)
         {
             AnsiConsole.MarkupLine("[red]Unknown command[/]");
             return true;
         }
 
-        return action();
+        var command = parts[0];
+        var args = parts.Count > 1 ? parts.Skip(1).ToArray() : [];
+
+        if (!_commands.TryGetValue(command, out Func<string[], bool>? action))
+        {
+            AnsiConsole.MarkupLine("[red]Unknown command[/]");
+            return true;
+        }
+
+        return action(args);
+    }
+
+    // Split the command arguments into a list of strings
+    // Handles quoted strings and whitespace
+    private static List<string> SplitCommandArgs(string input)
+    {
+        var args = new List<string>();
+        var current = new StringBuilder();
+        var inQuotes = false;
+
+        foreach (var c in input)
+        {
+            if (c == '"')
+            {
+                inQuotes = !inQuotes;
+                continue;
+            }
+
+            if (char.IsWhiteSpace(c) && !inQuotes)
+            {
+                if (current.Length > 0)
+                {
+                    args.Add(current.ToString());
+                    current.Clear();
+                }
+                continue;
+            }
+
+            current.Append(c);
+        }
+
+        if (current.Length > 0)
+            args.Add(current.ToString());
+
+        return args;
     }
 
     private static void HelpCommand()
@@ -67,13 +114,22 @@ sealed class CommandHandler
     private void ListCommand()
     {
         var movies = _database.GetMovies();
-        AnsiConsole.MarkupLine("List");
         foreach (var movie in movies)
         {
             AnsiConsole.MarkupLine($"[bold green]{movie.Title}[/] ({movie.Year}) - {movie.Genre} - {movie.Rating}");
         }
     }
 
+    private void AddCommand(string[] args)
+    {
+        if (args.Length != 4 && args.Length != 5)
+        {
+            AnsiConsole.MarkupLine("[red]Invalid number of arguments for /add command[/]");
+        }
+        var movie = new Movie(args[0], int.Parse(args[1]), args[2], int.Parse(args[3]), args[4] ?? null);
+        if (_database.AddMovie(movie))
+            AnsiConsole.MarkupLine($"[green]Movie {movie.Title} added successfully.[/]");
+    }
 }
 
 sealed class Database : IDisposable
@@ -201,6 +257,30 @@ sealed class Database : IDisposable
         }
 
         return movies;
+    }
+
+    public bool AddMovie(Movie movie)
+    {
+        try
+        {
+            using var command = _connection.CreateCommand();
+            command.CommandText = """
+            INSERT INTO movies (title, year, genre, rating_id, imdb_url)
+            VALUES (@title, @year, @genre, @rating_id, @imdb_url);
+         """;
+            command.Parameters.AddWithValue("@title", movie.Title);
+            command.Parameters.AddWithValue("@year", movie.Year);
+            command.Parameters.AddWithValue("@genre", movie.Genre);
+            command.Parameters.AddWithValue("@rating_id", movie.RatingId);
+            command.Parameters.AddWithValue("@imdb_url", movie.ImdbUrl);
+            command.ExecuteNonQuery();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine(string.Format("[red]Error adding movie: {0}[/]", ex.Message));
+            return false;
+        }
     }
 
     public void Dispose()
