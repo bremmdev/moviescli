@@ -36,9 +36,10 @@ sealed class CommandHandler
         _database = database;
         _commands = new(StringComparer.OrdinalIgnoreCase)
         {
+            ["/add"] = (args) => { AddCommand(args); return true; },
+            ["/delete"] = (args) => { DeleteCommand(args); return true; },
             ["/help"] = _ => { HelpCommand(); return true; },
             ["/list"] = _ => { ListCommand(); return true; },
-            ["/add"] = (args) => { AddCommand(args); return true; },
             ["/exit"] = _ => false,
             ["/quit"] = _ => false,
             ["/q"] = _ => false,
@@ -101,25 +102,6 @@ sealed class CommandHandler
         return args;
     }
 
-    private static void HelpCommand()
-    {
-        AnsiConsole.MarkupLine("""
-            [bold green]Available commands:[/]
-            [bold blue]/help[/] - Show this help message
-            [bold blue]/list[/] - List all movies
-            [bold blue]/exit[/] - Exit the application
-        """);
-    }
-
-    private void ListCommand()
-    {
-        var movies = _database.GetMovies();
-        foreach (var movie in movies)
-        {
-            AnsiConsole.MarkupLine($"[bold green]{movie.Title}[/] ({movie.Year}) - {movie.Genre} - {movie.Rating}");
-        }
-    }
-
     private void AddCommand(string[] args)
     {
         if (args.Length != 4 && args.Length != 5)
@@ -128,7 +110,52 @@ sealed class CommandHandler
         }
         var movie = new Movie(args[0], int.Parse(args[1]), args[2], int.Parse(args[3]), args[4] ?? null);
         if (_database.AddMovie(movie))
-            AnsiConsole.MarkupLine($"[green]Movie {movie.Title} added successfully.[/]");
+            AnsiConsole.MarkupLine($"[green]Movie {Markup.Escape(movie.Title)} added successfully.[/]");
+    }
+
+    // We can delete by id or title
+    private void DeleteCommand(string[] args)
+    {
+        if (args.Length != 1 || string.IsNullOrWhiteSpace(args[0]))
+        {
+            AnsiConsole.MarkupLine("[red]Usage: /delete <id|title>[/]");
+            return;
+        }
+        var arg = args[0];
+        // Delete by id or title depending on the argument type
+        string? deletedTitle = int.TryParse(arg, out var id)
+            ? _database.DeleteMovie(id, null)
+            : _database.DeleteMovie(null, arg);
+
+        if (!String.IsNullOrWhiteSpace(deletedTitle))
+            AnsiConsole.MarkupLine($"[green]Movie {Markup.Escape(deletedTitle)} deleted successfully.[/]");
+        else
+            AnsiConsole.MarkupLine("[red]Error deleting movie: invalid id or title[/]");
+    }
+
+
+    private static void HelpCommand()
+    {
+        AnsiConsole.MarkupLine("""
+            [bold green]Available commands:[/]
+            [bold blue]/help[/] - Show this help message
+            [bold blue]/list[/] - List all movies
+            [bold blue]/add[/] - Add a new movie, usage: /add <title> <year> <genre> <rating> <imdb_url>
+            [bold blue]/delete[/] - Delete a movie, usage: /delete <id|title>
+            [bold blue]/exit[/] - Exit the application
+            [bold blue]/quit[/] - Exit the application
+            [bold blue]/q[/] - Exit the application
+        """);
+    }
+
+    private void ListCommand()
+    {
+        var movies = _database.GetMovies();
+        foreach (var movie in movies)
+        {
+            AnsiConsole.MarkupLine(
+                $"[bold green]{movie.Id}[/] {Markup.Escape(movie.Title)} ({movie.Year}) - {Markup.Escape(movie.Genre)} - {Markup.Escape(movie.Rating)} - {Markup.Escape(movie.ImdbUrl ?? "")}");
+        }
     }
 }
 
@@ -230,6 +257,7 @@ sealed class Database : IDisposable
         using var command = _connection.CreateCommand();
         command.CommandText = """
             SELECT
+                m.id,
                 m.title,
                 m.year,
                 m.genre,
@@ -247,11 +275,12 @@ sealed class Database : IDisposable
         {
             movies.Add(
                 new MovieListItem(
-                    reader.GetString(0),
-                    reader.GetInt32(1),
-                    reader.GetString(2),
+                    reader.GetInt32(0),
+                    reader.GetString(1),
+                    reader.GetInt32(2),
                     reader.GetString(3),
-                    reader.IsDBNull(4) ? null : reader.GetString(4)
+                    reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5)
                 )
             );
         }
@@ -283,6 +312,31 @@ sealed class Database : IDisposable
         }
     }
 
+    public string? DeleteMovie(int? id, string? title)
+    {
+        using var command = _connection.CreateCommand();
+
+        try
+        {
+            if (!String.IsNullOrWhiteSpace(title))
+            {
+                command.CommandText = "DELETE FROM movies WHERE LOWER(title) = LOWER(@title) RETURNING title";
+                command.Parameters.AddWithValue("@title", title);
+            }
+            else
+            {
+                command.CommandText = "DELETE FROM movies WHERE id = @id RETURNING title";
+                command.Parameters.AddWithValue("@id", id);
+            }
+            return command.ExecuteScalar() as string;
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine(string.Format("[red]Error deleting movie: {0}[/]", ex.Message));
+            return null;
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -301,4 +355,4 @@ sealed class Database : IDisposable
 }
 
 record Movie(string Title, int Year, string Genre, int RatingId, string? ImdbUrl = null);
-record MovieListItem(string Title, int Year, string Genre, string Rating, string? ImdbUrl = null);
+record MovieListItem(int Id, string Title, int Year, string Genre, string Rating, string? ImdbUrl = null);
