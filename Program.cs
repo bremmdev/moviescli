@@ -1,6 +1,7 @@
 #:package Microsoft.Data.Sqlite@10.0.8
 #:package Spectre.Console@0.55.2
 
+using System.Net.WebSockets;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Spectre.Console;
@@ -110,7 +111,7 @@ sealed class CommandHandler
         }
         var movie = new Movie(args[0], int.Parse(args[1]), args[2], int.Parse(args[3]), args[4] ?? null);
         if (_database.AddMovie(movie))
-            AnsiConsole.MarkupLine($"[green]Movie {Markup.Escape(movie.Title)} added successfully.[/]");
+            AnsiConsole.MarkupLine($"[green]Movie '{Markup.Escape(movie.Title)}' added successfully.[/]");
     }
 
     // We can delete by id or title
@@ -133,7 +134,6 @@ sealed class CommandHandler
             AnsiConsole.MarkupLine("[red]Error deleting movie: invalid id or title[/]");
     }
 
-
     private static void HelpCommand()
     {
         AnsiConsole.MarkupLine("""
@@ -151,13 +151,34 @@ sealed class CommandHandler
     private void ListCommand()
     {
         var movies = _database.GetMovies();
+        var table = new Table();
+
+        // Add the headers based on the MovieListItem properties
+        foreach (var header in typeof(MovieListItem).GetProperties())
+        {
+            table.AddColumn(header.Name.ToLower());
+        }
+
+        var ratingColors = new Dictionary<string, string>
+        {
+            ["Very Poor"] = "red",
+            ["Poor"] = "orange",
+            ["Average"] = "#FFD700",
+            ["Good"] = "darkgreen",
+            ["Excellent"] = "green"
+        };
+
         foreach (var movie in movies)
         {
-            AnsiConsole.MarkupLine(
-                $"[bold green]{movie.Id}[/] {Markup.Escape(movie.Title)} ({movie.Year}) - {Markup.Escape(movie.Genre)} - {Markup.Escape(movie.Rating)} - {Markup.Escape(movie.ImdbUrl ?? "")}");
+            var styledTitle = movie.Rating == "Excellent" ? $"[bold green]{movie.Title}[/]" : movie.Title;
+            var ratingColor = ratingColors.TryGetValue(movie.Rating, out var color) ? color : "white";
+            var styleRating = $"[bold {ratingColor}]{movie.Rating}[/]";
+            table.AddRow(movie.Id.ToString(), styledTitle, movie.Year.ToString(), movie.Genre, styleRating, movie.ImdbUrl ?? "");
         }
+
+        AnsiConsole.Write(table);
     }
-}
+};
 
 sealed class Database : IDisposable
 {
