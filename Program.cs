@@ -1,18 +1,18 @@
 #:package Microsoft.Data.Sqlite@10.0.8
 #:package Spectre.Console@0.55.2
 
-using System.Net.WebSockets;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Spectre.Console;
 
 using var database = new Database("Data Source=movies.db");
 var handler = new CommandHandler(database);
+var reader = new CommandLineReader();
 
 while (true)
 {
     AnsiConsole.Markup("[grey]> [/]");
-    var input = Console.ReadLine();
+    var input = reader.ReadLine();
 
     if (input == null || !input.Trim().StartsWith('/'))
     {
@@ -24,6 +24,102 @@ while (true)
     // Needed so WAL journal is cleanly checked in
     if (!handler.HandleCommand(input.Trim()))
         break;
+}
+
+// Command line reader with history navigation via Arrow keys
+sealed class CommandLineReader
+{
+    private readonly List<string> _history = [];
+    private int _historyIndex;
+
+    public string? ReadLine()
+    {
+        // If the input is redirected (e.g. from a file or pipe) then use the default Console.ReadLine()
+        if (Console.IsInputRedirected)
+            return Console.ReadLine();
+
+        var buffer = new StringBuilder();
+        _historyIndex = _history.Count;
+        string? draft = null;
+
+        while (true)
+        {
+            var key = Console.ReadKey(intercept: true);
+
+            switch (key.Key)
+            {
+                case ConsoleKey.Enter:
+                    Console.WriteLine();
+                    AddToHistory(buffer.ToString());
+                    return buffer.ToString();
+
+                case ConsoleKey.Backspace:
+                    if (buffer.Length > 0)
+                    {
+                        buffer.Length--;
+                        Console.Write("\b \b");
+                    }
+                    break;
+
+                case ConsoleKey.UpArrow when _history.Count > 0:
+                    if (_historyIndex == _history.Count)
+                    {
+                        draft = buffer.ToString();
+                        _historyIndex = _history.Count - 1;
+                    }
+                    else if (_historyIndex > 0)
+                    {
+                        _historyIndex--;
+                    }
+                    ReplaceBuffer(buffer, _history[_historyIndex]);
+                    break;
+
+                case ConsoleKey.DownArrow when _history.Count > 0:
+                    if (_historyIndex < _history.Count - 1)
+                    {
+                        _historyIndex++;
+                        ReplaceBuffer(buffer, _history[_historyIndex]);
+                    }
+                    else if (_historyIndex == _history.Count - 1)
+                    {
+                        _historyIndex = _history.Count;
+                        ReplaceBuffer(buffer, draft ?? "");
+                    }
+                    break;
+
+                default:
+                    if (!char.IsControl(key.KeyChar))
+                    {
+                        buffer.Append(key.KeyChar);
+                        Console.Write(key.KeyChar);
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void ReplaceBuffer(StringBuilder buffer, string text)
+    {
+        while (buffer.Length > 0)
+        {
+            buffer.Length--;
+            Console.Write("\b \b");
+        }
+
+        buffer.Append(text);
+        Console.Write(text);
+    }
+
+    private void AddToHistory(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return;
+
+        if (_history.Count > 0 && _history[^1] == line)
+            return;
+
+        _history.Add(line);
+    }
 }
 
 sealed class CommandHandler
