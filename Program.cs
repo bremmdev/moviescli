@@ -219,7 +219,16 @@ sealed class CommandHandler
             AnsiConsole.MarkupLine("[red]Invalid number of arguments for /add command[/]");
             return;
         }
-        var movie = new Movie(args[0], int.Parse(args[1]), args[2], int.Parse(args[3]), args[4] ?? null);
+
+        var existingMovie = _database.GetMovie(args[0]);
+        if (existingMovie?.Title == args[0] && existingMovie.Year == int.Parse(args[1]))
+        {
+            AnsiConsole.MarkupLine($"[red]Movie '{Markup.Escape(existingMovie.Title)}' already exists.[/]");
+            return;
+        }
+
+        var imdbUrl = args.Length == 5 ? args[4] : null;
+        var movie = new Movie(args[0], int.Parse(args[1]), args[2], int.Parse(args[3]), imdbUrl);
         if (_database.AddMovie(movie))
             AnsiConsole.MarkupLine($"[green]Movie '{Markup.Escape(movie.Title)}' added successfully.[/]");
     }
@@ -391,6 +400,31 @@ sealed class Database : IDisposable
         command.CommandText = "SELECT COUNT(*) FROM movies";
         var result = command.ExecuteScalar();
         return Convert.ToInt32(result);
+    }
+
+    public MovieListItem? GetMovie(string title)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT * FROM movies WHERE LOWER(title) = LOWER(@title)";
+        command.Parameters.AddWithValue("@title", title);
+        var result = command.ExecuteReader();
+        return result.Read() ? new MovieListItem(
+            result.GetInt32(0),
+            result.GetString(1),
+            result.GetInt32(2),
+            result.GetString(3),
+            result.GetString(4),
+            result.IsDBNull(5) ? null : result.GetString(5)
+        ) : null;
+    }
+
+    public MovieListItem? GetMovie(int id)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT * FROM movies WHERE id = @id";
+        command.Parameters.AddWithValue("@id", id);
+        var result = command.ExecuteScalar();
+        return result as MovieListItem;
     }
 
     public List<MovieListItem> GetMovies()
