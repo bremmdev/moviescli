@@ -148,6 +148,7 @@ sealed class CommandHandler
         {
             ["/add"] = (args) => { AddCommand(args); return true; },
             ["/delete"] = (args) => { DeleteCommand(args); return true; },
+            ["/find"] = (args) => { FindCommand(args); return true; },
             ["/help"] = _ => { HelpCommand(); return true; },
             ["/list"] = _ => { ListCommand(); return true; },
             ["/exit"] = _ => false,
@@ -220,7 +221,7 @@ sealed class CommandHandler
             return;
         }
 
-        var existingMovie = _database.GetMovie(args[0]);
+        var existingMovie = _database.GetMovie(args[0], exactMatch: true);
         if (existingMovie?.Title == args[0] && existingMovie.Year == int.Parse(args[1]))
         {
             AnsiConsole.MarkupLine($"[red]Movie '{Markup.Escape(existingMovie.Title)}' already exists.[/]");
@@ -253,6 +254,37 @@ sealed class CommandHandler
             AnsiConsole.MarkupLine("[red]Error deleting movie: invalid id or title[/]");
     }
 
+    private void FindCommand(string[] args)
+    {
+        if (args.Length != 1 || string.IsNullOrWhiteSpace(args[0]))
+        {
+            AnsiConsole.MarkupLine("[red]Usage: /find <id|title>[/]");
+            return;
+        }
+        var arg = args[0];
+
+        // Find by id or title depending on the argument type
+        var movie = int.TryParse(arg, out var id)
+            ? _database.GetMovie(id)
+            : _database.GetMovie(arg);
+
+        if (movie != null)
+        {
+            var table = new Table();
+
+            // Add the headers based on the MovieListItem properties
+            foreach (var header in typeof(MovieListItem).GetProperties())
+            {
+                table.AddColumn(header.Name.ToLower());
+            }
+
+            table.AddRow(movie.Id.ToString(), movie.Title, movie.Year.ToString(), movie.Genre, movie.Rating, movie.ImdbUrl ?? "");
+            AnsiConsole.Write(table);
+        }
+        else
+            AnsiConsole.MarkupLine("[red]Movie not found[/]");
+    }
+
     private static void HelpCommand()
     {
         AnsiConsole.MarkupLine("""
@@ -261,6 +293,7 @@ sealed class CommandHandler
             [bold blue]/list[/] - List all movies
             [bold blue]/add[/] - Add a new movie, usage: /add <title> <year> <genre> <rating> <imdb_url>
             [bold blue]/delete[/] - Delete a movie, usage: /delete <id|title>
+            [bold blue]/find[/] - Find a movie, usage: /find <id|title>
             [bold blue]/exit[/] - Exit the application
             [bold blue]/quit[/] - Exit the application
             [bold blue]/q[/] - Exit the application
@@ -402,11 +435,11 @@ sealed class Database : IDisposable
         return Convert.ToInt32(result);
     }
 
-    public MovieListItem? GetMovie(string title)
+    public MovieListItem? GetMovie(string title, bool exactMatch = false)
     {
         using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT * FROM movies WHERE LOWER(title) = LOWER(@title)";
-        command.Parameters.AddWithValue("@title", title);
+        command.CommandText = "SELECT * FROM movies WHERE LOWER(title) LIKE LOWER(@title)";
+        command.Parameters.AddWithValue("@title", '%' + title + '%');
         var result = command.ExecuteReader();
         return result.Read() ? new MovieListItem(
             result.GetInt32(0),
@@ -423,8 +456,15 @@ sealed class Database : IDisposable
         using var command = _connection.CreateCommand();
         command.CommandText = "SELECT * FROM movies WHERE id = @id";
         command.Parameters.AddWithValue("@id", id);
-        var result = command.ExecuteScalar();
-        return result as MovieListItem;
+        var result = command.ExecuteReader();
+        return result.Read() ? new MovieListItem(
+            result.GetInt32(0),
+            result.GetString(1),
+            result.GetInt32(2),
+            result.GetString(3),
+            result.GetString(4),
+            result.IsDBNull(5) ? null : result.GetString(5)
+        ) : null;
     }
 
     public List<MovieListItem> GetMovies()
@@ -476,7 +516,7 @@ sealed class Database : IDisposable
             command.Parameters.AddWithValue("@year", movie.Year);
             command.Parameters.AddWithValue("@genre", movie.Genre);
             command.Parameters.AddWithValue("@rating_id", movie.RatingId);
-            command.Parameters.AddWithValue("@imdb_url", movie.ImdbUrl);
+            command.Parameters.AddWithValue("@imdb_url", movie.ImdbUrl ?? (object)DBNull.Value);
             command.ExecuteNonQuery();
             return true;
         }
