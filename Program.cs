@@ -9,6 +9,19 @@ using var database = new Database("Data Source=movies.db");
 var handler = new CommandHandler(database);
 var reader = new CommandLineReader();
 
+// Show welcome message
+try
+{
+    int count = database.GetMovieCount();
+    AnsiConsole.MarkupLine($"[bold green]Welcome to MovieCLI![/] Your collection has [bold]{count}[/] {(count == 1 ? "movie" : "movies")}.");
+    AnsiConsole.MarkupLine("[grey]Type [blue]/help[/] to see available commands.[/]");
+}
+catch
+{
+    AnsiConsole.MarkupLine("[red]Error getting movie count from database. Please check if the database file exists and is readable.[/]");
+    return;
+}
+
 while (true)
 {
     AnsiConsole.Markup("[grey]> [/]");
@@ -204,6 +217,7 @@ sealed class CommandHandler
         if (args.Length != 4 && args.Length != 5)
         {
             AnsiConsole.MarkupLine("[red]Invalid number of arguments for /add command[/]");
+            return;
         }
         var movie = new Movie(args[0], int.Parse(args[1]), args[2], int.Parse(args[3]), args[4] ?? null);
         if (_database.AddMovie(movie))
@@ -273,6 +287,8 @@ sealed class CommandHandler
         }
 
         AnsiConsole.Write(table);
+        string formattedCount = $"{movies.Count} {(movies.Count == 1 ? "movie" : "movies")} in collection.";
+        AnsiConsole.MarkupLine($"[bold green]{formattedCount}[/]");
     }
 };
 
@@ -365,6 +381,14 @@ sealed class Database : IDisposable
     private static int GetUserVersion(SqliteCommand command)
     {
         command.CommandText = "PRAGMA user_version;";
+        var result = command.ExecuteScalar();
+        return Convert.ToInt32(result);
+    }
+
+    public int GetMovieCount()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM movies";
         var result = command.ExecuteScalar();
         return Convert.ToInt32(result);
     }
