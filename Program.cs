@@ -148,12 +148,17 @@ sealed class CommandHandler
         {
             ["/add"] = (args) => { AddCommand(args); return true; },
             ["/delete"] = (args) => { DeleteCommand(args); return true; },
+            ["/export"] = _ => { ExportCommand(); return true; },
             ["/find"] = (args) => { FindCommand(args); return true; },
             ["/help"] = _ => { HelpCommand(); return true; },
             ["/list"] = _ => { ListCommand(); return true; },
+
+            // Aliases
             ["/exit"] = _ => false,
+            ["/ls"] = _ => { ListCommand(); return true; },
             ["/quit"] = _ => false,
             ["/q"] = _ => false,
+            ["/rm"] = (args) => { DeleteCommand(args); return true; },
         };
     }
 
@@ -254,6 +259,39 @@ sealed class CommandHandler
             AnsiConsole.MarkupLine("[red]Error deleting movie: invalid id or title[/]");
     }
 
+    // Helper function to escape SQL literals
+    private static string SqlLiteral(string value) => $"'{value.Replace("'", "''")}'";
+
+    private void ExportCommand()
+    {
+        try
+        {
+            var ratings = _database.GetRatingsForExport();
+            var movies = _database.GetMoviesForExport();
+
+            var sb = new StringBuilder();
+
+            foreach (var rating in ratings)
+            {
+                sb.AppendLine($"INSERT OR IGNORE INTO ratings (id, rating) VALUES ({rating.Id}, {SqlLiteral(rating.RatingName)});");
+            }
+
+            sb.AppendLine();
+
+            foreach (var movie in movies)
+            {
+                sb.AppendLine($"INSERT OR REPLACE INTO movies (id, title, year, genre, rating_id, imdb_url) VALUES ({movie.Id}, {SqlLiteral(movie.Title)}, {movie.Year}, {SqlLiteral(movie.Genre)}, {movie.RatingId}, {SqlLiteral(movie.ImdbUrl ?? "")});");
+            }
+
+            File.WriteAllText("export.sql", sb.ToString());
+            AnsiConsole.MarkupLine($"[green]Database exported to export.sql[/]");
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]Error exporting database: {ex.Message}[/]");
+        }
+    }
+
     private void FindCommand(string[] args)
     {
         if (args.Length != 1 || string.IsNullOrWhiteSpace(args[0]))
@@ -290,9 +328,10 @@ sealed class CommandHandler
         AnsiConsole.MarkupLine("""
             [bold green]Available commands:[/]
             [bold blue]/help[/] - Show this help message
-            [bold blue]/list[/] - List all movies
+            [bold blue]/list or /ls[/] - List all movies, usage: /list or /ls
             [bold blue]/add[/] - Add a new movie, usage: /add <title> <year> <genre> <rating> <imdb_url>
-            [bold blue]/delete[/] - Delete a movie, usage: /delete <id|title>
+            [bold blue]/delete or /rm[/] - Delete a movie, usage: /delete <id|title> or /rm <id|title>
+            [bold blue]/export[/] - Export the database to a SQL file, usage: /export
             [bold blue]/find[/] - Find a movie, usage: /find <id|title>
             [bold blue]/exit[/] - Exit the application
             [bold blue]/quit[/] - Exit the application
@@ -427,81 +466,7 @@ sealed class Database : IDisposable
         return Convert.ToInt32(result);
     }
 
-    public int GetMovieCount()
-    {
-        using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM movies";
-        var result = command.ExecuteScalar();
-        return Convert.ToInt32(result);
-    }
-
-    public MovieListItem? GetMovie(string title, bool exactMatch = false)
-    {
-        using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT * FROM movies WHERE LOWER(title) LIKE LOWER(@title)";
-        command.Parameters.AddWithValue("@title", '%' + title + '%');
-        var result = command.ExecuteReader();
-        return result.Read() ? new MovieListItem(
-            result.GetInt32(0),
-            result.GetString(1),
-            result.GetInt32(2),
-            result.GetString(3),
-            result.GetString(4),
-            result.IsDBNull(5) ? null : result.GetString(5)
-        ) : null;
-    }
-
-    public MovieListItem? GetMovie(int id)
-    {
-        using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT * FROM movies WHERE id = @id";
-        command.Parameters.AddWithValue("@id", id);
-        var result = command.ExecuteReader();
-        return result.Read() ? new MovieListItem(
-            result.GetInt32(0),
-            result.GetString(1),
-            result.GetInt32(2),
-            result.GetString(3),
-            result.GetString(4),
-            result.IsDBNull(5) ? null : result.GetString(5)
-        ) : null;
-    }
-
-    public List<MovieListItem> GetMovies()
-    {
-        using var command = _connection.CreateCommand();
-        command.CommandText = """
-            SELECT
-                m.id,
-                m.title,
-                m.year,
-                m.genre,
-                r.rating,
-                m.imdb_url
-            FROM movies AS m
-            INNER JOIN ratings AS r ON r.id = m.rating_id
-            ORDER BY m.title, m.year;
-        """;
-
-        using var reader = command.ExecuteReader();
-        var movies = new List<MovieListItem>();
-
-        while (reader.Read())
-        {
-            movies.Add(
-                new MovieListItem(
-                    reader.GetInt32(0),
-                    reader.GetString(1),
-                    reader.GetInt32(2),
-                    reader.GetString(3),
-                    reader.GetString(4),
-                    reader.IsDBNull(5) ? null : reader.GetString(5)
-                )
-            );
-        }
-
-        return movies;
-    }
+    // TABLE OPERATIONS
 
     public bool AddMovie(Movie movie)
     {
@@ -552,6 +517,133 @@ sealed class Database : IDisposable
         }
     }
 
+    public MovieListItem? GetMovie(string title, bool exactMatch = false)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT * FROM movies WHERE LOWER(title) LIKE LOWER(@title)";
+        command.Parameters.AddWithValue("@title", '%' + title + '%');
+        var result = command.ExecuteReader();
+        return result.Read() ? new MovieListItem(
+            result.GetInt32(0),
+            result.GetString(1),
+            result.GetInt32(2),
+            result.GetString(3),
+            result.GetString(4),
+            result.IsDBNull(5) ? null : result.GetString(5)
+        ) : null;
+    }
+
+    public MovieListItem? GetMovie(int id)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT * FROM movies WHERE id = @id";
+        command.Parameters.AddWithValue("@id", id);
+        var result = command.ExecuteReader();
+        return result.Read() ? new MovieListItem(
+            result.GetInt32(0),
+            result.GetString(1),
+            result.GetInt32(2),
+            result.GetString(3),
+            result.GetString(4),
+            result.IsDBNull(5) ? null : result.GetString(5)
+        ) : null;
+    }
+
+    public int GetMovieCount()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM movies";
+        var result = command.ExecuteScalar();
+        return Convert.ToInt32(result);
+    }
+
+    public List<MovieListItem> GetMovies()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                m.id,
+                m.title,
+                m.year,
+                m.genre,
+                r.rating,
+                m.imdb_url
+            FROM movies AS m
+            INNER JOIN ratings AS r ON r.id = m.rating_id
+            ORDER BY m.title, m.year;
+        """;
+
+        using var reader = command.ExecuteReader();
+        var movies = new List<MovieListItem>();
+
+        while (reader.Read())
+        {
+            movies.Add(
+                new MovieListItem(
+                    reader.GetInt32(0),
+                    reader.GetString(1),
+                    reader.GetInt32(2),
+                    reader.GetString(3),
+                    reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5)
+                )
+            );
+        }
+
+        return movies;
+    }
+
+    public List<MovieItemForExport> GetMoviesForExport()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, title, year, genre, rating_id, imdb_url
+            FROM movies
+            ORDER BY title, year
+            """;
+
+        using var reader = command.ExecuteReader();
+        var movies = new List<MovieItemForExport>();
+
+        while (reader.Read())
+        {
+            var imdbUrlOrdinal = reader.GetOrdinal("imdb_url");
+            movies.Add(
+                new MovieItemForExport(
+                    reader.GetInt32(reader.GetOrdinal("id")),
+                    reader.GetString(reader.GetOrdinal("title")),
+                    reader.GetInt32(reader.GetOrdinal("year")),
+                    reader.GetString(reader.GetOrdinal("genre")),
+                    reader.GetInt32(reader.GetOrdinal("rating_id")),
+                    reader.IsDBNull(imdbUrlOrdinal) ? null : reader.GetString(imdbUrlOrdinal)
+                )
+            );
+        }
+
+        return movies;
+    }
+
+    public List<Rating> GetRatingsForExport()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT id, rating FROM ratings ORDER BY id";
+
+        using var reader = command.ExecuteReader();
+        var ratings = new List<Rating>();
+
+        while (reader.Read())
+        {
+            ratings.Add(
+                new Rating(
+                    reader.GetInt32(reader.GetOrdinal("id")),
+                    reader.GetString(reader.GetOrdinal("rating"))
+                )
+            );
+        }
+
+        return ratings;
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -571,3 +663,7 @@ sealed class Database : IDisposable
 
 record Movie(string Title, int Year, string Genre, int RatingId, string? ImdbUrl = null);
 record MovieListItem(int Id, string Title, int Year, string Genre, string Rating, string? ImdbUrl = null);
+
+record MovieItemForExport(int Id, string Title, int Year, string Genre, int RatingId, string? ImdbUrl = null);
+
+record Rating(int Id, string RatingName);
