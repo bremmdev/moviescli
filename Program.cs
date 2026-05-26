@@ -7,7 +7,8 @@ using Spectre.Console;
 
 using var database = new Database("Data Source=movies.db");
 var handler = new CommandHandler(database);
-var reader = new CommandLineReader();
+IEnumerable<string> availableCommands = handler.GetCommands();
+var reader = new CommandLineReader(availableCommands);
 
 // Show welcome message
 try
@@ -44,6 +45,12 @@ sealed class CommandLineReader
 {
     private readonly List<string> _history = [];
     private int _historyIndex;
+    private readonly List<string> _commands;
+
+    public CommandLineReader(IEnumerable<string> commands)
+    {
+        _commands = commands.OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
+    }
 
     public string? ReadLine()
     {
@@ -54,6 +61,9 @@ sealed class CommandLineReader
         var buffer = new StringBuilder();
         _historyIndex = _history.Count;
         string? draft = null;
+        string? tabPrefix = null;
+        int tabIndex = -1;
+        IReadOnlyList<string>? tabMatches = null;
 
         while (true)
         {
@@ -71,10 +81,33 @@ sealed class CommandLineReader
                     {
                         buffer.Length--;
                         Console.Write("\b \b");
+                        ResetTabCycle(ref tabPrefix, ref tabIndex, ref tabMatches);
                     }
                     break;
 
+                case ConsoleKey.Tab:
+                    var commandPrefix = GetCommandPrefix(buffer);
+                    if (tabPrefix is not null
+                        && tabMatches is not null
+                        && commandPrefix.StartsWith(tabPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        tabIndex = (tabIndex + 1) % tabMatches.Count;
+                    }
+                    else
+                    {
+                        tabPrefix = commandPrefix;
+                        tabMatches = _commands
+                            .Where(c => c.StartsWith(tabPrefix, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        tabIndex = 0;
+                    }
+
+                    if (tabMatches.Count > 0)
+                        ReplaceCommand(buffer, tabMatches[tabIndex]);
+                    break;
+
                 case ConsoleKey.UpArrow when _history.Count > 0:
+                    ResetTabCycle(ref tabPrefix, ref tabIndex, ref tabMatches);
                     if (_historyIndex == _history.Count)
                     {
                         draft = buffer.ToString();
@@ -88,6 +121,7 @@ sealed class CommandLineReader
                     break;
 
                 case ConsoleKey.DownArrow when _history.Count > 0:
+                    ResetTabCycle(ref tabPrefix, ref tabIndex, ref tabMatches);
                     if (_historyIndex < _history.Count - 1)
                     {
                         _historyIndex++;
@@ -105,10 +139,33 @@ sealed class CommandLineReader
                     {
                         buffer.Append(key.KeyChar);
                         Console.Write(key.KeyChar);
+                        ResetTabCycle(ref tabPrefix, ref tabIndex, ref tabMatches);
                     }
                     break;
             }
         }
+    }
+
+    private static string GetCommandPrefix(StringBuilder buffer)
+    {
+        var text = buffer.ToString();
+        var space = text.IndexOf(' ');
+        return space >= 0 ? text[..space] : text;
+    }
+
+    private static void ReplaceCommand(StringBuilder buffer, string command)
+    {
+        var text = buffer.ToString();
+        var space = text.IndexOf(' ');
+        var suffix = space >= 0 ? text[space..] : "";
+        ReplaceBuffer(buffer, command + suffix);
+    }
+
+    private static void ResetTabCycle(ref string? tabPrefix, ref int tabIndex, ref IReadOnlyList<string>? tabMatches)
+    {
+        tabPrefix = null;
+        tabIndex = -1;
+        tabMatches = null;
     }
 
     private static void ReplaceBuffer(StringBuilder buffer, string text)
@@ -160,6 +217,11 @@ sealed class CommandHandler
             ["/q"] = _ => false,
             ["/rm"] = (args) => { DeleteCommand(args); return true; },
         };
+    }
+
+    public IEnumerable<string> GetCommands()
+    {
+        return _commands.Keys;
     }
 
     public bool HandleCommand(string input)
