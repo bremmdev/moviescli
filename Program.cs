@@ -28,7 +28,14 @@ while (true)
     AnsiConsole.Markup("[grey]> [/]");
     var input = reader.ReadLine();
 
-    if (input == null || !input.Trim().StartsWith('/'))
+    // If the user pressed Control-C, exit the application
+    if (input == null)
+    {
+        handler.HandleCommand("/exit");
+        break;
+    }
+
+    if (!input.Trim().StartsWith('/'))
     {
         AnsiConsole.MarkupLine("[red]Invalid command. Commands must start with '/'[/]");
         continue;
@@ -68,9 +75,14 @@ sealed class CommandLineReader
         while (true)
         {
             var key = Console.ReadKey(intercept: true);
+            Console.TreatControlCAsInput = true; // Mark Control-C as a valid input instead of exiting the application
 
             switch (key.Key)
             {
+                case ConsoleKey.C when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    // Return null to indicate that the user pressed Control-C so the main loop can exit
+                    return null;
+
                 case ConsoleKey.Enter:
                     Console.WriteLine();
                     AddToHistory(buffer.ToString());
