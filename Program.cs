@@ -9,6 +9,8 @@ using var database = new Database("Data Source=movies.db");
 var handler = new CommandHandler(database);
 IEnumerable<string> availableCommands = handler.GetCommands();
 var reader = new CommandLineReader(availableCommands);
+if (!Console.IsInputRedirected)
+    Console.TreatControlCAsInput = true; // Let the reader handle Control-C as a clean exit.
 
 // Show welcome message
 try
@@ -75,7 +77,6 @@ sealed class CommandLineReader
         while (true)
         {
             var key = Console.ReadKey(intercept: true);
-            Console.TreatControlCAsInput = true; // Mark Control-C as a valid input instead of exiting the application
 
             switch (key.Key)
             {
@@ -531,6 +532,7 @@ sealed class Database : IDisposable
         }
 
         transaction.Commit();
+        CheckpointWal();
     }
 
     private static int GetUserVersion(SqliteCommand command)
@@ -557,6 +559,7 @@ sealed class Database : IDisposable
             command.Parameters.AddWithValue("@rating_id", movie.RatingId);
             command.Parameters.AddWithValue("@imdb_url", movie.ImdbUrl ?? (object)DBNull.Value);
             command.ExecuteNonQuery();
+            CheckpointWal();
             return true;
         }
         catch (Exception ex)
@@ -582,7 +585,11 @@ sealed class Database : IDisposable
                 command.CommandText = "DELETE FROM movies WHERE id = @id RETURNING title";
                 command.Parameters.AddWithValue("@id", id);
             }
-            return command.ExecuteScalar() as string;
+            var deletedTitle = command.ExecuteScalar() as string;
+            if (deletedTitle is not null)
+                CheckpointWal();
+
+            return deletedTitle;
         }
         catch (Exception ex)
         {
@@ -723,15 +730,18 @@ sealed class Database : IDisposable
         if (_disposed)
             return;
 
-        // Checkpoint the database to ensure all changes are written to disk
+        CheckpointWal();
+        _connection.Dispose();
+        _disposed = true;
+    }
+
+    private void CheckpointWal()
+    {
         using (var cmd = _connection.CreateCommand())
         {
             cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
             cmd.ExecuteNonQuery();
         }
-
-        _connection.Dispose();
-        _disposed = true;
     }
 }
 
