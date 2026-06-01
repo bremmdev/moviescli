@@ -218,7 +218,7 @@ sealed class CommandHandler
         {
             ["/add"] = (args) => { AddCommand(args); return true; },
             ["/delete"] = (args) => { DeleteCommand(args); return true; },
-            ["/export"] = _ => { ExportCommand(); return true; },
+            ["/export"] = (args) => { ExportCommand(args); return true; },
             ["/find"] = (args) => { FindCommand(args); return true; },
             ["/help"] = _ => { HelpCommand(); return true; },
             ["/list"] = _ => { ListCommand(); return true; },
@@ -337,8 +337,20 @@ sealed class CommandHandler
     // Helper function to escape SQL literals
     private static string SqlLiteral(string value) => $"'{value.Replace("'", "''")}'";
 
-    private void ExportCommand()
+    // Helper function to quote command arguments for /add exports
+    private static string CommandLiteral(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
+
+    // 2 modes: 'add' mode (default) exports /add statements, 'sql' mode exports sql code
+    private void ExportCommand(string[] args)
     {
+        if (args.Length != 1 || (args[0] != "sql" && args[0] != "text"))
+        {
+            AnsiConsole.MarkupLine("[red]Usage: /export sql or /export text[/]");
+            return;
+        }
+
+        bool isSQL = args[0] == "sql";
+
         try
         {
             var ratings = _database.GetRatingsForExport();
@@ -346,20 +358,36 @@ sealed class CommandHandler
 
             var sb = new StringBuilder();
 
-            foreach (var rating in ratings)
+            if (movies.Count == 0)
             {
-                sb.AppendLine($"INSERT OR IGNORE INTO ratings (id, rating) VALUES ({rating.Id}, {SqlLiteral(rating.RatingName)});");
+                AnsiConsole.MarkupLine("[red]No movies found in database[/]");
+                return;
             }
 
-            sb.AppendLine();
-
-            foreach (var movie in movies)
+            if (isSQL)
             {
-                sb.AppendLine($"INSERT OR REPLACE INTO movies (id, title, year, genre, rating_id, imdb_url) VALUES ({movie.Id}, {SqlLiteral(movie.Title)}, {movie.Year}, {SqlLiteral(movie.Genre)}, {movie.RatingId}, {SqlLiteral(movie.ImdbUrl ?? "")});");
+                foreach (var rating in ratings)
+                {
+                    sb.AppendLine($"INSERT OR IGNORE INTO ratings (id, rating) VALUES ({rating.Id}, {SqlLiteral(rating.RatingName)});");
+                }
+
+                sb.AppendLine();
+
+                foreach (var movie in movies)
+                {
+                    sb.AppendLine($"INSERT OR REPLACE INTO movies (id, title, year, genre, rating_id, imdb_url) VALUES ({movie.Id}, {SqlLiteral(movie.Title)}, {movie.Year}, {SqlLiteral(movie.Genre)}, {movie.RatingId}, {SqlLiteral(movie.ImdbUrl ?? "")});");
+                }
+            }
+            else
+            {
+                foreach (var movie in movies)
+                {
+                    sb.AppendLine($"/add {CommandLiteral(movie.Title)} {movie.Year} {CommandLiteral(movie.Genre)} {movie.RatingId} {CommandLiteral(movie.ImdbUrl ?? "")}");
+                }
             }
 
-            File.WriteAllText("export.sql", sb.ToString());
-            AnsiConsole.MarkupLine($"[green]Database exported to export.sql[/]");
+            File.WriteAllText(isSQL ? "export.sql" : "export.txt", sb.ToString());
+            AnsiConsole.MarkupLine($"[green]Database exported to {Markup.Escape(isSQL ? "export.sql" : "export.txt")}[/]");
         }
         catch (Exception ex)
         {
@@ -406,7 +434,7 @@ sealed class CommandHandler
             [bold blue]/list or /ls[/] - List all movies, usage: /list or /ls
             [bold blue]/add[/] - Add a new movie, usage: /add <title> <year> <genre> <rating> <imdb_url>
             [bold blue]/delete or /rm[/] - Delete a movie, usage: /delete <id|title> or /rm <id|title>
-            [bold blue]/export[/] - Export the database to a SQL file, usage: /export
+            [bold blue]/export[/] - Export the database to text file or SQL file, usage: /export [sql] or /export [text]
             [bold blue]/find[/] - Find a movie, usage: /find <id|title>
             [bold blue]/exit[/] - Exit the application
             [bold blue]/quit[/] - Exit the application
