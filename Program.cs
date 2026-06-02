@@ -221,6 +221,7 @@ sealed class CommandHandler
             ["/export"] = (args) => { ExportCommand(args); return true; },
             ["/find"] = (args) => { FindCommand(args); return true; },
             ["/help"] = _ => { HelpCommand(); return true; },
+            ["/import"] = (args) => { ImportCommand(args[0]); return true; },
             ["/list"] = _ => { ListCommand(); return true; },
 
             // Aliases
@@ -293,25 +294,37 @@ sealed class CommandHandler
         return args;
     }
 
-    private void AddCommand(string[] args)
+    // Bool indicating success or failure
+    private bool AddCommand(string[] args)
     {
         if (args.Length != 4 && args.Length != 5)
         {
             AnsiConsole.MarkupLine("[red]Invalid number of arguments for /add command[/]");
-            return;
+            return false;
+        }
+
+        if (!int.TryParse(args[1], out var year) || !int.TryParse(args[3], out var rating))
+        {
+            AnsiConsole.MarkupLine("[red]Invalid year or rating for /add command[/]");
+            return false;
         }
 
         var existingMovie = _database.GetMovie(args[0], exactMatch: true);
-        if (existingMovie?.Title == args[0] && existingMovie.Year == int.Parse(args[1]))
+        if (existingMovie?.Title == args[0] && existingMovie.Year == year)
         {
             AnsiConsole.MarkupLine($"[red]Movie '{Markup.Escape(existingMovie.Title)}' already exists.[/]");
-            return;
+            return false;
         }
 
         var imdbUrl = args.Length == 5 ? args[4] : null;
-        var movie = new Movie(args[0], int.Parse(args[1]), args[2], int.Parse(args[3]), imdbUrl);
+        var movie = new Movie(args[0], year, args[2], rating, imdbUrl);
         if (_database.AddMovie(movie))
+        {
             AnsiConsole.MarkupLine($"[green]Movie '{Markup.Escape(movie.Title)}' added successfully.[/]");
+            return true;
+        }
+
+        return false;
     }
 
     // We can delete by id or title
@@ -340,7 +353,8 @@ sealed class CommandHandler
     // Helper function to quote command arguments for /add exports
     private static string CommandLiteral(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
 
-    // 2 modes: 'add' mode (default) exports /add statements, 'sql' mode exports sql code
+    // 2 modes: 'add' mode (default) exports /add statements in a .txt, 'sql' mode exports sql code
+    // The .txt file can be imported, the .sql file can be run against the db using the sqlite cli
     private void ExportCommand(string[] args)
     {
         if (args.Length != 1 || (args[0] != "sql" && args[0] != "text"))
@@ -436,10 +450,43 @@ sealed class CommandHandler
             [bold blue]/delete or /rm[/] - Delete a movie, usage: /delete <id|title> or /rm <id|title>
             [bold blue]/export[/] - Export the database to text file or SQL file, usage: /export [sql] or /export [text]
             [bold blue]/find[/] - Find a movie, usage: /find <id|title>
+            [bold blue]/import[/] - Import data from an exported text file, usage: /import <path>
             [bold blue]/exit[/] - Exit the application
             [bold blue]/quit[/] - Exit the application
             [bold blue]/q[/] - Exit the application
         """);
+    }
+
+    // Import data from an exported text file
+    private void ImportCommand(string path)
+    {
+        if (!File.Exists(path) || Path.GetExtension(path) != ".txt")
+        {
+            AnsiConsole.MarkupLine($"[red]File '{Markup.Escape(path)}' not found or is not a text file.[/]");
+            return;
+        }
+
+        var lines = File.ReadAllLines(path);
+        var successCount = 0;
+        var errorCount = 0;
+
+        foreach (var line in lines)
+        {
+            var parts = SplitCommandArgs(line.Trim());
+            if (parts.Count == 0 || !parts[0].Equals("/add", StringComparison.OrdinalIgnoreCase))
+            {
+                AnsiConsole.MarkupLine($"[red]Invalid line: {Markup.Escape(line)}[/]");
+                errorCount++;
+                continue;
+            }
+
+            if (AddCommand(parts.Skip(1).ToArray()))
+                successCount++;
+            else
+                errorCount++;
+        }
+
+        AnsiConsole.MarkupLine($"[green]{successCount} movies imported successfully, {errorCount} movies failed to import.[/]");
     }
 
     private void ListCommand()
