@@ -50,7 +50,7 @@ while (true)
 }
 
 // Command line reader with history navigation via Arrow keys
-sealed class CommandLineReader
+file sealed class CommandLineReader
 {
     private readonly List<string> _history = [];
     private int _historyIndex;
@@ -205,7 +205,7 @@ sealed class CommandLineReader
     }
 }
 
-sealed class CommandHandler
+file sealed class CommandHandler
 {
     private readonly Database _database;
     // Dictionary of commands and their corresponding actions, case-insensitive
@@ -309,10 +309,9 @@ sealed class CommandHandler
             return false;
         }
 
-        var existingMovie = _database.GetMovie(args[0], exactMatch: true);
-        if (existingMovie?.Title == args[0] && existingMovie.Year == year)
+        if (_database.MovieExists(args[0], year))
         {
-            AnsiConsole.MarkupLine($"[red]Movie '{Markup.Escape(existingMovie.Title)}' already exists.[/]");
+            AnsiConsole.MarkupLine($"[red]Movie '{Markup.Escape(args[0])}' already exists.[/]");
             return false;
         }
 
@@ -523,7 +522,7 @@ sealed class CommandHandler
     }
 };
 
-sealed class Database : IDisposable
+file sealed class Database : IDisposable
 {
     private readonly SqliteConnection _connection;
     private bool _disposed;
@@ -619,6 +618,22 @@ sealed class Database : IDisposable
 
     // TABLE OPERATIONS
 
+    public bool MovieExists(string title, int year)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1
+            FROM movies
+            WHERE LOWER(title) = LOWER(@title)
+                AND year = @year
+            LIMIT 1;
+        """;
+        command.Parameters.AddWithValue("@title", title);
+        command.Parameters.AddWithValue("@year", year);
+        var result = command.ExecuteScalar();
+        return result is not null;
+    }
+
     public bool AddMovie(Movie movie)
     {
         try
@@ -676,9 +691,37 @@ sealed class Database : IDisposable
     public MovieListItem? GetMovie(string title, bool exactMatch = false)
     {
         using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT * FROM movies WHERE LOWER(title) LIKE LOWER(@title)";
-        command.Parameters.AddWithValue("@title", '%' + title + '%');
-        var result = command.ExecuteReader();
+        command.CommandText = exactMatch
+            ? """
+                SELECT
+                    m.id,
+                    m.title,
+                    m.year,
+                    m.genre,
+                    r.rating,
+                    m.imdb_url
+                FROM movies AS m
+                INNER JOIN ratings AS r ON r.id = m.rating_id
+                WHERE LOWER(m.title) = LOWER(@title)
+                ORDER BY m.title, m.year
+                LIMIT 1;
+            """
+            : """
+                SELECT
+                    m.id,
+                    m.title,
+                    m.year,
+                    m.genre,
+                    r.rating,
+                    m.imdb_url
+                FROM movies AS m
+                INNER JOIN ratings AS r ON r.id = m.rating_id
+                WHERE LOWER(m.title) LIKE LOWER(@title)
+                ORDER BY m.title, m.year
+                LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("@title", exactMatch ? title : '%' + title + '%');
+        using var result = command.ExecuteReader();
         return result.Read() ? new MovieListItem(
             result.GetInt32(0),
             result.GetString(1),
@@ -692,9 +735,21 @@ sealed class Database : IDisposable
     public MovieListItem? GetMovie(int id)
     {
         using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT * FROM movies WHERE id = @id";
+        command.CommandText = """
+            SELECT
+                m.id,
+                m.title,
+                m.year,
+                m.genre,
+                r.rating,
+                m.imdb_url
+            FROM movies AS m
+            INNER JOIN ratings AS r ON r.id = m.rating_id
+            WHERE m.id = @id
+            LIMIT 1;
+        """;
         command.Parameters.AddWithValue("@id", id);
-        var result = command.ExecuteReader();
+        using var result = command.ExecuteReader();
         return result.Read() ? new MovieListItem(
             result.GetInt32(0),
             result.GetString(1),
@@ -820,9 +875,9 @@ sealed class Database : IDisposable
     }
 }
 
-record Movie(string Title, int Year, string Genre, int RatingId, string? ImdbUrl = null);
-record MovieListItem(int Id, string Title, int Year, string Genre, string Rating, string? ImdbUrl = null);
+file sealed record Movie(string Title, int Year, string Genre, int RatingId, string? ImdbUrl = null);
+file sealed record MovieListItem(int Id, string Title, int Year, string Genre, string Rating, string? ImdbUrl = null);
 
-record MovieItemForExport(int Id, string Title, int Year, string Genre, int RatingId, string? ImdbUrl = null);
+file sealed record MovieItemForExport(int Id, string Title, int Year, string Genre, int RatingId, string? ImdbUrl = null);
 
-record Rating(int Id, string RatingName);
+file sealed record Rating(int Id, string RatingName);
