@@ -93,7 +93,7 @@ file sealed class CommandLineReader
                     if (buffer.Length > 0)
                     {
                         buffer.Length--;
-                        Console.Write("\b \b");
+                        Console.Write("\b \b"); // write backspace character to erase the last character
                         ResetTabCycle(ref tabPrefix, ref tabIndex, ref tabMatches);
                     }
                     break;
