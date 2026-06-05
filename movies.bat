@@ -1,4 +1,3 @@
 @echo off
 cd /d "%~dp0"
-title MovieCLI
-dotnet run .\Program.cs
+wt --maximized -d "%CD%" cmd /c "title MovieCLI && dotnet run .\Program.cs"
