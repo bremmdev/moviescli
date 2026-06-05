@@ -303,9 +303,26 @@ file sealed class CommandHandler
             return false;
         }
 
-        if (!int.TryParse(args[1], out var year) || !int.TryParse(args[3], out var rating))
+        // Rating can be either a number or a string
+        if (!int.TryParse(args[3], out var rating))
         {
-            AnsiConsole.MarkupLine("[red]Invalid year or rating for /add command[/]");
+            // Get the rating id from the database
+            rating = _database.GetRatingId(args[3]) ?? -1;
+            if (rating == -1)
+            {
+                AnsiConsole.MarkupLine("[red]Invalid rating for /add command[/]");
+                return false;
+            }
+        }
+        else if (rating < 1 || rating > 5)
+        {
+            AnsiConsole.MarkupLine("[red]Invalid rating for /add command[/]");
+            return false;
+        }
+
+        if (!int.TryParse(args[1], out var year))
+        {
+            AnsiConsole.MarkupLine("[red]Invalid year for /add command[/]");
             return false;
         }
 
@@ -445,7 +462,7 @@ file sealed class CommandHandler
             [bold green]Available commands:[/]
             [bold blue]/help[/] - Show this help message
             [bold blue]/list or /ls[/] - List all movies, usage: /list or /ls
-            [bold blue]/add[/] - Add a new movie, usage: /add <title> <year> <genre> <rating> <imdb_url>
+            [bold blue]/add[/] - Add a new movie, usage: /add <title> <year> <genre> <rating_id | rating_name> <imdb_url>
             [bold blue]/delete or /rm[/] - Delete a movie, usage: /delete <id|title> or /rm <id|title>
             [bold blue]/export[/] - Export the database to text file or SQL file, usage: /export [sql] or /export [text]
             [bold blue]/find[/] - Find a movie, usage: /find <id|title>
@@ -686,6 +703,15 @@ file sealed class Database : IDisposable
             AnsiConsole.MarkupLine(string.Format("[red]Error deleting movie: {0}[/]", ex.Message));
             return null;
         }
+    }
+
+    public int? GetRatingId(string ratingName)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT id FROM ratings WHERE LOWER(rating) = LOWER(@ratingName)";
+        command.Parameters.AddWithValue("@ratingName", ratingName);
+        var result = command.ExecuteScalar();
+        return result is not null ? Convert.ToInt32(result) : null;
     }
 
     public MovieListItem? GetMovie(string title, bool exactMatch = false)

@@ -4,17 +4,17 @@ A terminal-based movie collection manager backed by SQLite. Type slash commands 
 
 ## Functionalities
 
-| Command          | Alias         | Description                                                          |
-| ---------------- | ------------- | -------------------------------------------------------------------- |
-| `/help`          | —             | Show available commands                                              |
-| `/list`          | `/ls`         | List all movies in a formatted table (ratings are color-coded)       |
-| `/add`           | —             | Add a movie: title, year, genre, rating ID, optional IMDb URL        |
-| `/find`          | —             | Look up a movie by numeric ID or title (partial title match)         |
-| `/delete`        | `/rm`         | Remove a movie by ID or exact title (case-insensitive)               |
-| `/export text`   | —             | Write all movies as `/add` lines to `export.txt`                     |
-| `/export sql`    | —             | Write ratings and movies as SQL `INSERT` statements to `export.sql`  |
-| `/import <path>` | —             | Import movies from an exported `.txt` file (one `/add` line per row) |
-| `/exit`          | `/quit`, `/q` | Exit the application                                                 |
+| Command          | Alias         | Description                                                           |
+| ---------------- | ------------- | --------------------------------------------------------------------- |
+| `/help`          | —             | Show available commands                                               |
+| `/list`          | `/ls`         | List all movies in a formatted table (ratings are color-coded)        |
+| `/add`           | —             | Add a movie: title, year, genre, rating id or name, optional IMDb URL |
+| `/find`          | —             | Look up a movie by numeric ID or title (partial title match)          |
+| `/delete`        | `/rm`         | Remove a movie by ID or exact title (case-insensitive)                |
+| `/export text`   | —             | Write all movies as `/add` lines to `export.txt`                      |
+| `/export sql`    | —             | Write ratings and movies as SQL `INSERT` statements to `export.sql`   |
+| `/import <path>` | —             | Import movies from an exported `.txt` file (one `/add` line per row)  |
+| `/exit`          | `/quit`, `/q` | Exit the application                                                  |
 
 **Interactive input**
 
@@ -162,7 +162,6 @@ flowchart TD
 
 - **Single-file, no project file** — The app is one `Program.cs` script; there is no `.csproj`, test suite, or separate configuration layer.
 - **No edit command** — Movies can be added and deleted, but not updated in place.
-- **Rating as numeric ID** — `/add` expects a rating ID (1–5), not a label like `"Good"`. Invalid IDs may fail at the database layer (foreign key constraint).
 - **No rating ID validation in `/add`** — Only year and rating are parsed as integers; genre and title are accepted as-is.
 - **Duplicate rule is title + year only** — Same title in a different year is allowed; same title and year is blocked (case-insensitive).
 - **Find vs delete title behavior differs** — `/find` uses partial, case-insensitive `LIKE` matching; `/delete` by title requires an exact case-insensitive match.
