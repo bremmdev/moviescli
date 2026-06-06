@@ -4,17 +4,17 @@ A terminal-based movie collection manager backed by SQLite. Type slash commands 
 
 ## Functionalities
 
-| Command          | Alias         | Description                                                           |
-| ---------------- | ------------- | --------------------------------------------------------------------- |
-| `/help`          | —             | Show available commands                                               |
-| `/list`          | `/ls`         | List all movies in a formatted table (ratings are color-coded)        |
-| `/add`           | —             | Add a movie: title, year, genre, rating id or name, optional IMDb URL |
-| `/find`          | —             | Look up a movie by numeric ID or title (partial title match)          |
-| `/delete`        | `/rm`         | Remove a movie by ID or exact title (case-insensitive)                |
-| `/export text`   | —             | Write all movies as `/add` lines to `export.txt`                      |
-| `/export sql`    | —             | Write ratings and movies as SQL `INSERT` statements to `export.sql`   |
-| `/import <path>` | —             | Import movies from an exported `.txt` file (one `/add` line per row)  |
-| `/exit`          | `/quit`, `/q` | Exit the application                                                  |
+| Command          | Alias         | Description                                                                                  |
+| ---------------- | ------------- | -------------------------------------------------------------------------------------------- |
+| `/help`          | —             | Show available commands                                                                      |
+| `/list`          | `/ls`         | List all movies in a formatted table (ratings are color-coded)                               |
+| `/add`           | —             | Add a movie: title, year, genre, rating id or name, optional IMDb URL                        |
+| `/find`          | —             | Look up a movie by numeric ID or title (partial title match)                                 |
+| `/delete`        | `/rm`         | Remove a movie by ID or exact title (case-insensitive)                                       |
+| `/export text`   | —             | Write all movies as `/add` lines to a `.txt` file (default: `export.txt`)                    |
+| `/export sql`    | —             | Write ratings and movies as SQL `INSERT` statements to a `.sql` file (default: `export.sql`) |
+| `/import <path>` | —             | Import movies from an exported `.txt` file (one `/add` line per row)                         |
+| `/exit`          | `/quit`, `/q` | Exit the application                                                                         |
 
 **Interactive input**
 
@@ -72,6 +72,7 @@ movies.bat
 /delete 1
 /delete "The Matrix"
 /export text
+/export text backup
 /import export.txt
 /help
 /exit
@@ -91,8 +92,10 @@ Use quotes around title, genre, or URL when they contain spaces:
 
 **Export / import**
 
-- `/export text` creates `export.txt` with lines you can re-import via `/import export.txt`
-- `/export sql` creates `export.sql` for use with the SQLite CLI or another SQL client
+- `/export text [path]` writes `/add` lines to a `.txt` file (defaults to `export.txt`; paths without an extension get `.txt` appended)
+- `/export sql [path]` writes SQL `INSERT` statements to a `.sql` file (defaults to `export.sql`; paths without an extension get `.sql` appended)
+- Export mode must match the file extension (e.g. `/export text backup.sql` is rejected)
+- `/import <path>` only accepts `.txt` files containing `/add` lines; SQL export files must be run with the SQLite CLI
 
 ## High-level overview of classes
 
@@ -166,6 +169,5 @@ flowchart TD
 - **Duplicate rule is title + year only** — Same title in a different year is allowed; same title and year is blocked (case-insensitive).
 - **Find vs delete title behavior differs** — `/find` uses partial, case-insensitive `LIKE` matching; `/delete` by title requires an exact case-insensitive match.
 - **Import restrictions** — Only `.txt` files containing `/add` lines are supported; SQL export files cannot be imported through `/import`.
-- **Fixed export paths** — Exports always write to `export.txt` or `export.sql` in the current working directory (no custom output path).
 - **Schema versioning** — Only the initial schema (version 1) is created; there are no migrations for future schema changes.
 - **Platform helper** — `movies.bat` is Windows-oriented; other platforms use `dotnet run Program.cs` directly.

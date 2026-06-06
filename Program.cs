@@ -369,17 +369,35 @@ file sealed class CommandHandler
     // Helper function to quote command arguments for /add exports
     private static string CommandLiteral(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
 
+    private static bool HasExtension(string path, string extension) =>
+        Path.GetExtension(path).Equals(extension, StringComparison.OrdinalIgnoreCase);
+
     // 2 modes: 'add' mode (default) exports /add statements in a .txt, 'sql' mode exports sql code
     // The .txt file can be imported, the .sql file can be run against the db using the sqlite cli
     private void ExportCommand(string[] args)
     {
-        if (args.Length != 1 || (args[0] != "sql" && args[0] != "text"))
+        if (args.Length < 1 || args.Length > 2 || (args[0] != "sql" && args[0] != "text"))
         {
-            AnsiConsole.MarkupLine("[red]Usage: /export sql or /export text[/]");
+            AnsiConsole.MarkupLine("[red]Usage: /export sql [path] or /export text [path][/]");
             return;
         }
 
         bool isSQL = args[0] == "sql";
+        string path = args.Length == 2 ? args[1] : "export." + (isSQL ? "sql" : "txt");
+
+        if (string.IsNullOrEmpty(Path.GetExtension(path)))
+            path += isSQL ? ".sql" : ".txt";
+
+        if (isSQL && !HasExtension(path, ".sql"))
+        {
+            AnsiConsole.MarkupLine($"[red]In SQL mode path must end with .sql (got: {Markup.Escape(path)})[/]");
+            return;
+        }
+        if (!isSQL && !HasExtension(path, ".txt"))
+        {
+            AnsiConsole.MarkupLine($"[red]In text mode path must end with .txt (got: {Markup.Escape(path)})[/]");
+            return;
+        }
 
         try
         {
@@ -416,8 +434,8 @@ file sealed class CommandHandler
                 }
             }
 
-            File.WriteAllText(isSQL ? "export.sql" : "export.txt", sb.ToString());
-            AnsiConsole.MarkupLine($"[green]Database exported to {Markup.Escape(isSQL ? "export.sql" : "export.txt")}[/]");
+            File.WriteAllText(path, sb.ToString());
+            AnsiConsole.MarkupLine($"[green]Database exported to {Markup.Escape(path)}[/]");
         }
         catch (Exception ex)
         {
@@ -464,7 +482,7 @@ file sealed class CommandHandler
             [bold blue]/list or /ls[/] - List all movies, usage: /list or /ls
             [bold blue]/add[/] - Add a new movie, usage: /add <title> <year> <genre> <rating_id | rating_name> <imdb_url>
             [bold blue]/delete or /rm[/] - Delete a movie, usage: /delete <id|title> or /rm <id|title>
-            [bold blue]/export[/] - Export the database to text file or SQL file, usage: /export [sql] or /export [text]
+            [bold blue]/export[/] - Export the database to text file or SQL file, usage: /export sql [path] or /export text [path]
             [bold blue]/find[/] - Find a movie, usage: /find <id|title>
             [bold blue]/import[/] - Import data from an exported text file, usage: /import <path>
             [bold blue]/exit[/] - Exit the application
@@ -476,7 +494,7 @@ file sealed class CommandHandler
     // Import data from an exported text file
     private void ImportCommand(string path)
     {
-        if (!File.Exists(path) || Path.GetExtension(path) != ".txt")
+        if (!File.Exists(path) || !HasExtension(path, ".txt"))
         {
             AnsiConsole.MarkupLine($"[red]File '{Markup.Escape(path)}' not found or is not a text file.[/]");
             return;
