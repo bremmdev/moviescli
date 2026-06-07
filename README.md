@@ -7,9 +7,9 @@ A terminal-based movie collection manager backed by SQLite. Type slash commands 
 | Command          | Alias         | Description                                                                                  |
 | ---------------- | ------------- | -------------------------------------------------------------------------------------------- |
 | `/help`          | —             | Show available commands                                                                      |
-| `/list`          | `/ls`         | List all movies in a formatted table (ratings are color-coded)                               |
+| `/list`          | `/ls`         | List all movies in a formatted table (ratings are color-coded); prints a collection count    |
 | `/add`           | —             | Add a movie: title, year, genre, rating id or name, optional IMDb URL                        |
-| `/find`          | —             | Look up a movie by numeric ID or title (partial title match)                                 |
+| `/find`          | —             | Search movies by ID, partial title, or `key=value` filters; results in the same table format |
 | `/delete`        | `/rm`         | Remove a movie by ID or exact title (case-insensitive)                                       |
 | `/export text`   | —             | Write all movies as `/add` lines to a `.txt` file (default: `export.txt`)                    |
 | `/export sql`    | —             | Write ratings and movies as SQL `INSERT` statements to a `.sql` file (default: `export.sql`) |
@@ -69,6 +69,8 @@ movies.bat
 /list
 /find Matrix
 /find 1
+/find genre=Sci-Fi
+/find title=Matrix year=1999
 /delete 1
 /delete "The Matrix"
 /export text
@@ -89,6 +91,26 @@ Use quotes around title, genre, or URL when they contain spaces:
 ```text
 /add "Blade Runner 2049" 2017 "Sci-Fi" 4
 ```
+
+**Listing / finding movies**
+
+`/list` and `/ls` show every movie in a color-coded table and print a count line afterward (e.g. `3 movies in collection.`).
+
+`/find` accepts either a single lookup or one or more filters:
+
+```text
+/find <id|title>
+/find <filter1=value1> [filter2=value2 ...]
+```
+
+- **Single argument** (no `=`): numeric ID or partial, case-insensitive title match
+- **Filters** (combined with AND):
+  - `title` — partial match
+  - `year` — exact match
+  - `genre` — partial match
+  - `rating` — exact match (case-insensitive)
+
+Multiple matches are shown in the same table format as `/list`. `/delete` by title still requires an exact case-insensitive match.
 
 **Export / import**
 
@@ -165,9 +187,7 @@ flowchart TD
 
 - **Single-file, no project file** — The app is one `Program.cs` script; there is no `.csproj`, test suite, or separate configuration layer.
 - **No edit command** — Movies can be added and deleted, but not updated in place.
-- **No rating ID validation in `/add`** — Only year and rating are parsed as integers; genre and title are accepted as-is.
-- **Duplicate rule is title + year only** — Same title in a different year is allowed; same title and year is blocked (case-insensitive).
-- **Find vs delete title behavior differs** — `/find` uses partial, case-insensitive `LIKE` matching; `/delete` by title requires an exact case-insensitive match.
+- **Find vs delete title behavior differs** — `/find` uses partial, case-insensitive matching for titles (and `title=` filters); `/delete` by title requires an exact case-insensitive match.
 - **Import restrictions** — Only `.txt` files containing `/add` lines are supported; SQL export files cannot be imported through `/import`.
 - **Schema versioning** — Only the initial schema (version 1) is created; there are no migrations for future schema changes.
 - **Platform helper** — `movies.bat` is Windows-oriented; other platforms use `dotnet run Program.cs` directly.

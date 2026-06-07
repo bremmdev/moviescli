@@ -207,6 +207,15 @@ file sealed class CommandLineReader
 
 file sealed class CommandHandler
 {
+    private static readonly Dictionary<string, string> RatingColors = new()
+    {
+        ["Very Poor"] = "red",
+        ["Poor"] = "orange",
+        ["Average"] = "#FFD700",
+        ["Good"] = "darkgreen",
+        ["Excellent"] = "green"
+    };
+
     private readonly Database _database;
     // Dictionary of commands and their corresponding actions, case-insensitive
     private readonly Dictionary<string, Func<string[], bool>> _commands;
@@ -378,7 +387,7 @@ file sealed class CommandHandler
     {
         if (args.Length < 1 || args.Length > 2 || (args[0] != "sql" && args[0] != "text"))
         {
-            AnsiConsole.MarkupLine("[red]Usage: /export sql [path] or /export text [path][/]");
+            AnsiConsole.MarkupLine("[red]Usage: /export sql [[path]] or /export text [[path]][/]");
             return;
         }
 
@@ -445,33 +454,19 @@ file sealed class CommandHandler
 
     private void FindCommand(string[] args)
     {
-        if (args.Length != 1 || string.IsNullOrWhiteSpace(args[0]))
+
+        if (args.Length < 1 || string.IsNullOrWhiteSpace(args[0]))
         {
-            AnsiConsole.MarkupLine("[red]Usage: /find <id|title>[/]");
+            AnsiConsole.MarkupLine("[red]Usage: /find <id|title> [[filter1=value1 filter2=value2 ...]][/]");
             return;
         }
-        var arg = args[0];
+        // Find movies by id or title or filters depending on the argument type
+        var movies = _database.GetMovies(args);
 
-        // Find by id or title depending on the argument type
-        var movie = int.TryParse(arg, out var id)
-            ? _database.GetMovie(id)
-            : _database.GetMovie(arg);
-
-        if (movie != null)
-        {
-            var table = new Table();
-
-            // Add the headers based on the MovieListItem properties
-            foreach (var header in typeof(MovieListItem).GetProperties())
-            {
-                table.AddColumn(header.Name.ToLower());
-            }
-
-            table.AddRow(movie.Id.ToString(), movie.Title, movie.Year.ToString(), movie.Genre, movie.Rating, movie.ImdbUrl ?? "");
-            AnsiConsole.Write(table);
-        }
+        if (movies.Count > 0)
+            AnsiConsole.Write(BuildMovieTable(movies));
         else
-            AnsiConsole.MarkupLine("[red]Movie not found[/]");
+            AnsiConsole.MarkupLine("[red]No movies found[/]");
     }
 
     private static void HelpCommand()
@@ -479,11 +474,11 @@ file sealed class CommandHandler
         AnsiConsole.MarkupLine("""
             [bold green]Available commands:[/]
             [bold blue]/help[/] - Show this help message
-            [bold blue]/list or /ls[/] - List all movies, usage: /list or /ls
+            [bold blue]/list or /ls[/] - List all movies in a formatted table (with collection count), usage: /list or /ls
             [bold blue]/add[/] - Add a new movie, usage: /add <title> <year> <genre> <rating_id | rating_name> <imdb_url>
             [bold blue]/delete or /rm[/] - Delete a movie, usage: /delete <id|title> or /rm <id|title>
-            [bold blue]/export[/] - Export the database to text file or SQL file, usage: /export sql [path] or /export text [path]
-            [bold blue]/find[/] - Find a movie, usage: /find <id|title>
+            [bold blue]/export[/] - Export the database to text file or SQL file, usage: /export sql [[path]] or /export text [[path]]
+            [bold blue]/find[/] - Search movies by id, title, or filters, usage: /find <id|title> [[filter1=value1 filter2=value2 ...]] (filters: title, year, genre, rating)
             [bold blue]/import[/] - Import data from an exported text file, usage: /import <path>
             [bold blue]/exit[/] - Exit the application
             [bold blue]/quit[/] - Exit the application
@@ -525,35 +520,40 @@ file sealed class CommandHandler
 
     private void ListCommand()
     {
-        var movies = _database.GetMovies();
-        var table = new Table();
-
-        // Add the headers based on the MovieListItem properties
-        foreach (var header in typeof(MovieListItem).GetProperties())
-        {
-            table.AddColumn(header.Name.ToLower());
-        }
-
-        var ratingColors = new Dictionary<string, string>
-        {
-            ["Very Poor"] = "red",
-            ["Poor"] = "orange",
-            ["Average"] = "#FFD700",
-            ["Good"] = "darkgreen",
-            ["Excellent"] = "green"
-        };
-
-        foreach (var movie in movies)
-        {
-            var styledTitle = movie.Rating == "Excellent" ? $"[bold green]{movie.Title}[/]" : movie.Title;
-            var ratingColor = ratingColors.TryGetValue(movie.Rating, out var color) ? color : "white";
-            var styleRating = $"[bold {ratingColor}]{movie.Rating}[/]";
-            table.AddRow(movie.Id.ToString(), styledTitle, movie.Year.ToString(), movie.Genre, styleRating, movie.ImdbUrl ?? "");
-        }
-
-        AnsiConsole.Write(table);
+        var movies = _database.GetMovies([]);
+        AnsiConsole.Write(BuildMovieTable(movies));
         string formattedCount = $"{movies.Count} {(movies.Count == 1 ? "movie" : "movies")} in collection.";
         AnsiConsole.MarkupLine($"[bold green]{formattedCount}[/]");
+    }
+
+    private static Table BuildMovieTable(IEnumerable<MovieListItem> movies)
+    {
+        var table = new Table();
+        foreach (var header in typeof(MovieListItem).GetProperties())
+            table.AddColumn(header.Name.ToLower());
+
+        foreach (var movie in movies)
+            table.AddRow(FormatMovieRow(movie));
+
+        return table;
+    }
+
+    private static string[] FormatMovieRow(MovieListItem movie)
+    {
+        var escapedTitle = Markup.Escape(movie.Title);
+        var styledTitle = movie.Rating == "Excellent" ? $"[bold green]{escapedTitle}[/]" : escapedTitle;
+        var ratingColor = RatingColors.TryGetValue(movie.Rating, out var color) ? color : "white";
+        var styledRating = $"[bold {ratingColor}]{movie.Rating}[/]";
+
+        return
+        [
+            movie.Id.ToString(),
+            styledTitle,
+            movie.Year.ToString(),
+            Markup.Escape(movie.Genre),
+            styledRating,
+            Markup.Escape(movie.ImdbUrl ?? "")
+        ];
     }
 };
 
@@ -812,10 +812,61 @@ file sealed class Database : IDisposable
         return Convert.ToInt32(result);
     }
 
-    public List<MovieListItem> GetMovies()
+    public List<MovieListItem> GetMovies(string[] filterArgs)
     {
+        var whereClause = new StringBuilder();
+        var parameters = new List<SqliteParameter>();
+
+        // If there is only one argument and it doesn't contain '=', then it's a title or id
+        if (filterArgs.Length == 1 && !filterArgs[0].Contains('='))
+        {
+            var arg = filterArgs[0];
+            if (int.TryParse(arg, out var id))
+            {
+                AppendWhereClause(whereClause, "m.id = @id");
+                parameters.Add(new SqliteParameter("@id", id));
+            }
+            else
+            {
+                AppendWhereClause(whereClause, "LOWER(m.title) LIKE LOWER(@title)");
+                parameters.Add(new SqliteParameter("@title", $"%{arg}%"));
+            }
+        }
+
+        // If there are multiple arguments, then it's a list of filters space separated with '='
+        else
+        {
+            foreach (var filter in filterArgs)
+            {
+                var parts = filter.Split('=', 2);
+                if (parts.Length != 2)
+                    continue;
+
+                switch (parts[0].ToLowerInvariant())
+                {
+                    case "title":
+                        AppendWhereClause(whereClause, "LOWER(m.title) LIKE @title");
+                        parameters.Add(new SqliteParameter("@title", $"%{parts[1]}%"));
+                        break;
+                    case "year":
+                        AppendWhereClause(whereClause, "m.year = @year");
+                        parameters.Add(new SqliteParameter("@year", parts[1]));
+                        break;
+                    case "genre":
+                        AppendWhereClause(whereClause, "m.genre LIKE @genre");
+                        parameters.Add(new SqliteParameter("@genre", $"%{parts[1]}%"));
+                        break;
+                    case "rating":
+                        AppendWhereClause(whereClause, "LOWER(r.rating) = LOWER(@rating)");
+                        parameters.Add(new SqliteParameter("@rating", parts[1]));
+                        break;
+                }
+            }
+        }
+
         using var command = _connection.CreateCommand();
-        command.CommandText = """
+        var where = whereClause.Length > 0 ? $"WHERE {whereClause}" : "";
+        command.CommandText = $"""
             SELECT
                 m.id,
                 m.title,
@@ -825,8 +876,12 @@ file sealed class Database : IDisposable
                 m.imdb_url
             FROM movies AS m
             INNER JOIN ratings AS r ON r.id = m.rating_id
+            {where}
             ORDER BY m.title, m.year;
-        """;
+            """;
+
+        foreach (var parameter in parameters)
+            command.Parameters.Add(parameter);
 
         using var reader = command.ExecuteReader();
         var movies = new List<MovieListItem>();
@@ -846,6 +901,13 @@ file sealed class Database : IDisposable
         }
 
         return movies;
+    }
+
+    private static void AppendWhereClause(StringBuilder whereClause, string condition)
+    {
+        if (whereClause.Length > 0)
+            whereClause.Append(" AND ");
+        whereClause.Append(condition);
     }
 
     public List<MovieItemForExport> GetMoviesForExport()
