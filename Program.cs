@@ -68,6 +68,7 @@ file sealed class CommandLineReader
             return Console.ReadLine();
 
         var buffer = new StringBuilder();
+        var pos = 0; // cursor position within the buffer (0..buffer.Length)
         _historyIndex = _history.Count;
         string? draft = null;
         string? tabPrefix = null;
@@ -90,11 +91,29 @@ file sealed class CommandLineReader
                     return buffer.ToString();
 
                 case ConsoleKey.Backspace:
-                    if (buffer.Length > 0)
+                    if (pos > 0)
                     {
-                        buffer.Length--;
-                        Console.Write("\b \b"); // write backspace character to erase the last character
+                        pos--;
+                        buffer.Remove(pos, 1);
+                        Console.Write('\b'); // step the visual cursor back onto the deleted character
+                        RedrawTail(buffer, pos, pos, clearedChar: true);
                         ResetTabCycle(ref tabPrefix, ref tabIndex, ref tabMatches);
+                    }
+                    break;
+
+                case ConsoleKey.LeftArrow:
+                    if (pos > 0)
+                    {
+                        pos--;
+                        Console.Write('\b');
+                    }
+                    break;
+
+                case ConsoleKey.RightArrow:
+                    if (pos < buffer.Length)
+                    {
+                        Console.Write(buffer[pos]);
+                        pos++;
                     }
                     break;
 
@@ -116,7 +135,7 @@ file sealed class CommandLineReader
                     }
 
                     if (tabMatches.Count > 0)
-                        ReplaceCommand(buffer, tabMatches[tabIndex]);
+                        pos = ReplaceCommand(buffer, pos, tabMatches[tabIndex]);
                     break;
 
                 case ConsoleKey.UpArrow when _history.Count > 0:
@@ -130,7 +149,7 @@ file sealed class CommandLineReader
                     {
                         _historyIndex--;
                     }
-                    ReplaceBuffer(buffer, _history[_historyIndex]);
+                    pos = ReplaceBuffer(buffer, pos, _history[_historyIndex]);
                     break;
 
                 case ConsoleKey.DownArrow when _history.Count > 0:
@@ -138,20 +157,21 @@ file sealed class CommandLineReader
                     if (_historyIndex < _history.Count - 1)
                     {
                         _historyIndex++;
-                        ReplaceBuffer(buffer, _history[_historyIndex]);
+                        pos = ReplaceBuffer(buffer, pos, _history[_historyIndex]);
                     }
                     else if (_historyIndex == _history.Count - 1)
                     {
                         _historyIndex = _history.Count;
-                        ReplaceBuffer(buffer, draft ?? "");
+                        pos = ReplaceBuffer(buffer, pos, draft ?? "");
                     }
                     break;
 
                 default:
                     if (!char.IsControl(key.KeyChar))
                     {
-                        buffer.Append(key.KeyChar);
-                        Console.Write(key.KeyChar);
+                        buffer.Insert(pos, key.KeyChar);
+                        pos++;
+                        RedrawTail(buffer, pos - 1, pos, clearedChar: false);
                         ResetTabCycle(ref tabPrefix, ref tabIndex, ref tabMatches);
                     }
                     break;
@@ -166,12 +186,12 @@ file sealed class CommandLineReader
         return space >= 0 ? text[..space] : text;
     }
 
-    private static void ReplaceCommand(StringBuilder buffer, string command)
+    private static int ReplaceCommand(StringBuilder buffer, int pos, string command)
     {
         var text = buffer.ToString();
         var space = text.IndexOf(' ');
         var suffix = space >= 0 ? text[space..] : "";
-        ReplaceBuffer(buffer, command + suffix);
+        return ReplaceBuffer(buffer, pos, command + suffix);
     }
 
     private static void ResetTabCycle(ref string? tabPrefix, ref int tabIndex, ref IReadOnlyList<string>? tabMatches)
@@ -181,8 +201,13 @@ file sealed class CommandLineReader
         tabMatches = null;
     }
 
-    private static void ReplaceBuffer(StringBuilder buffer, string text)
+    // Replaces the whole line with text and returns the new cursor position (end of text).
+    private static int ReplaceBuffer(StringBuilder buffer, int pos, string text)
     {
+        // The visual cursor may sit mid-line; walk it to the end before erasing.
+        for (var i = pos; i < buffer.Length; i++)
+            Console.Write(buffer[i]);
+
         while (buffer.Length > 0)
         {
             buffer.Length--;
@@ -191,6 +216,21 @@ file sealed class CommandLineReader
 
         buffer.Append(text);
         Console.Write(text);
+        return text.Length;
+    }
+
+    // Repaints buffer[from..] starting at the current console cursor (assumed to be at column
+    // `from`), then parks the cursor at column `cursor`. Pass clearedChar:true after a deletion
+    // so the vacated trailing column is overwritten with a blank.
+    private static void RedrawTail(StringBuilder buffer, int from, int cursor, bool clearedChar)
+    {
+        for (var i = from; i < buffer.Length; i++)
+            Console.Write(buffer[i]);
+        if (clearedChar)
+            Console.Write(' ');
+
+        for (var col = buffer.Length + (clearedChar ? 1 : 0); col > cursor; col--)
+            Console.Write('\b');
     }
 
     private void AddToHistory(string line)
