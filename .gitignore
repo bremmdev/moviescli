@@ -2,3 +2,4 @@
 *.sql
 .vscode
 export.*
+movies_wsl.bat
